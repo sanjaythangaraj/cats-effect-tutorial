@@ -17,7 +17,7 @@
 package introduction
 
 // You will probably need this import
-// import scala.concurrent.duration.*
+import scala.concurrent.duration.*
 
 import cats.effect.IO
 import cats.effect.IOApp
@@ -40,7 +40,8 @@ object Clock extends IOApp.Simple {
 
   /** Convert an Instant to a LocalTime */
   def instantToLocalTime(instant: Instant): LocalTime =
-    instant.atZone(ZoneOffset.UTC).toLocalTime()
+//    instant.atZone(ZoneOffset.UTC).toLocalTime
+    instant.atZone(ZoneId.of("GMT+05:30")).toLocalTime
 
   def clock(canvas: Canvas): IO[Nothing] =
     // This code should repeat forever:
@@ -52,7 +53,13 @@ object Clock extends IOApp.Simple {
     //
     // Note: You should use methods on IO, and methods defined here, to accomplish
     // this. You should not directly access any Java APIs.
-    ???
+    val program = for {
+      instant <- IO.realTimeInstant
+      time <- IO(instantToLocalTime(instant))
+      _ <- draw(time, canvas)
+    } yield ()
+
+    program.flatMap(_ => IO.sleep(1.second)).foreverM
 
   /** Given the current time and a canvas, draw a representation of the current
     * time on the canvas
