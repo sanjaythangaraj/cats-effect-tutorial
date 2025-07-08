@@ -29,7 +29,26 @@ object Parallelism extends IOApp.Simple {
   // expects an IO with the name `run` which describes the program it will run.
   // So replace `run` below with whatever you want to see your programs in
   // action.
-//  val run = (IO(println("Left!")), IO(println("Right!"))).parTupled.flatMap(IO.println) // ((), ())
+
+  // How does parMap work? It's an instance of the Parallel type class.
+
+  // Despite it's name, Parallel is not about running code in parallel. It's just about having a different
+  // implementation of mapN and friends with different semantics.
+  // For IO these different semantics are, coincidently, about parallelism,
+  // but you can call parMapN on Either and get something else.
+
+  val failed1: Either[List[String], Int] = Left(List("Oh no! I failed!"))
+  val failed2: Either[List[String], Int] = Left(List("Oh no! I also failed!"))
+
+  val mapNOnEithers: Either[List[String], Int] = (failed1, failed2).mapN(_ + _)
+  val parMapNOnEithers: Either[List[String], Int] = (failed1, failed2).parMapN(_ + _)
+
+   //val run = (IO(println("Left!")), IO(println("Right!"))).parTupled.flatMap(IO.println) // ((), ())
+
+  val run: IO[Unit] = {
+    IO.println(mapNOnEithers) *>
+    IO.println(parMapNOnEithers)
+  }
 
   // 1. Blackhole.consumeCPU consumes CPU cycles, and so is a useful way to
   // create tasks that take up enough time we can actually see the benefits of
@@ -78,12 +97,12 @@ object Parallelism extends IOApp.Simple {
     List.tabulate(32)(i => Math.pow(2.toDouble, i.toDouble).toLong)
   }
 
-  val run: IO[Unit] = {
-    val sequence = listofTokens.traverse(_ => consume).timed.flatMap((f, _) => IO.println(f.toSeconds))
-
-    val parallel = listofTokens.parTraverse(_ => consume).timed.flatMap((f, _) => IO.println(f.toSeconds))
-
-    sequence // 61s
-    parallel // 8s
-  }
+//  val run: IO[Unit] = {
+//    val sequence = listofTokens.traverse(_ => consume).timed.flatMap((f, _) => IO.println(f.toSeconds))
+//
+//    val parallel = listofTokens.parTraverse(_ => consume).timed.flatMap((f, _) => IO.println(f.toSeconds))
+//
+//    sequence // 61s
+//    parallel // 8s
+//  }
 }
