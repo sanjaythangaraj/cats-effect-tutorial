@@ -17,8 +17,11 @@
 package parallelism
 
 import cats.effect.*
+import cats.effect.std.Semaphore
 import cats.syntax.all.*
+
 import scala.concurrent.duration.*
+import scala.util.Random
 
 // The goal is to understand how to work with the concurrent tools in the Cats
 // Effects standard library.
@@ -32,7 +35,7 @@ object Tools extends IOApp.Simple {
   // ---------------------------------------------------------------------------
   //
   // The first challenge is about creating refs.
-  val ref = IO.ref(0)
+  val refIO = IO.ref(0)
 
   def printAndIncrement(name: String)(ref: Ref[IO, Int]): IO[Int] =
     for {
@@ -42,14 +45,14 @@ object Tools extends IOApp.Simple {
 
   val first =
     (
-      ref.flatMap(printAndIncrement("Left")),
-      ref.flatMap(printAndIncrement("Right"))
+      refIO.flatMap(printAndIncrement("Left")),
+      refIO.flatMap(printAndIncrement("Right"))
     )
       .parMapN((l, r) => s"Values were $l and $r")
       .flatMap(IO.println)
 
   val second =
-    ref.flatMap { r =>
+    refIO.flatMap { r =>
       (printAndIncrement("Left")(r), printAndIncrement("Right")(r))
         .parMapN((l, r) => s"Values were $l and $r")
         .flatMap(IO.println)
@@ -59,7 +62,7 @@ object Tools extends IOApp.Simple {
   // behaviour do you observe when these two programs are run. Why do you see
   // that behaviour? Which one do you think would be correct if we wanted to use
   // a `Ref` to coordinate two concurrent processes?
-  val run = IO.println("First") *> first *> IO.println("Second") *> second
+  // val run = IO.println("First") *> first *> IO.println("Second") *> second
 
   // ---------------------------------------------------------------------------
   // Challenge Two
@@ -75,19 +78,33 @@ object Tools extends IOApp.Simple {
   // certain time. For simplicity, our result will just be a number stored in
   // the `Ref`. You can reuse `ref` above for this.
 
-  val random = scala.util.Random
-  val smallRandomSleep =
+  val random: Random.type = scala.util.Random
+  val smallRandomSleep: IO[Unit] =
     IO(random.nextInt(100)).flatMap(ms => IO.sleep(ms.millis))
 
   // This is the process that generates a result. Calling `replicateA_` repeats
   // it 100 times. You need to modify this so it adds the values it generates to
   // the shared ref. Then run five of these processes in parallel.
-  val generate = smallRandomSleep.map(_ => random.nextInt(10)).replicateA_(100)
+//  def generate(ref: Ref[IO, Int]): IO[Unit] = {
+//    val process: IO[Unit] =
+//      smallRandomSleep
+//        .map(_ => random.nextInt(10))
+//        .flatMap(i => ref.update(_ + i))
+//        .replicateA_(100)
+//    List.fill(5)(process).parSequence.void
+//  }
 
   // This is the process that collects the result. Modify it so it gets the
   // value from the shared ref when the sleep finishes, and then prints out that
   // value. It should run in parallel with the generators.
-  val collector = IO.sleep(1.second)
+//  def collector(ref: Ref[IO, Int]): IO[Unit] =
+//    IO.sleep(1.second) *> ref.get.flatMap(IO.println)
+
+//  val run: IO[Unit] = {
+//    refIO.flatMap { ref =>
+//      (generate(ref), collector(ref)).parTupled
+//    }.void
+//  }
 
   // ---------------------------------------------------------------------------
   // Challenge Three
@@ -104,4 +121,32 @@ object Tools extends IOApp.Simple {
   //
   // For bonus mark, use IO.race to collect the result when the first of 100
   // permits become available or 1 second has elapsed.
+
+  def generate(ref: Ref[IO, Int], semaphore: Semaphore[IO]): IO[Unit] = {
+    val process =
+      smallRandomSleep
+        .map(_ => random.nextInt(10))
+        .flatMap { i =>
+          ref.update(_ + i) *> semaphore.releaseN(i)
+        }
+        .replicateA_(100)
+
+    List.fill(5)(process).parSequence.void
+  }
+
+  def collector(ref: Ref[IO, Int], semaphore: Semaphore[IO]): IO[Unit] = {
+    IO.race(
+      semaphore.acquireN(100) *> ref.get,
+      IO.sleep(1.second) *> ref.get
+    ).flatMap {
+      case Left(value) => IO.println(s"Collected after 100 permits: $value")
+      case Right(value) => IO.println(s"Collected after 1 second: $value")
+    }
+  }
+
+  val run: IO[Unit] =
+    (Ref.of[IO, Int](0), Semaphore[IO](0)).tupled.flatMap { case (ref, semaphore) =>
+      (generate(ref, semaphore), collector(ref, semaphore)).parTupled
+    }.void
+
 }
