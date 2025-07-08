@@ -26,8 +26,12 @@ object JobManager extends IOApp.Simple {
 
   // Evaluate the Job, creating an IO that runs all the stages in the correct
   // order and returns the sum of the values computed by each stage.
-  def eval(job: Job): IO[Int] =
-    ???
+  def eval(job: Job): IO[Int] = {
+    job.stages.map {
+      case Stage.Sequential(work) => work
+      case Stage.Parallel(repeats, work) => List.fill(repeats)(work).parSequence.map(_.sum)
+    }.sequence.map(_.sum)
+  }
 
   //----------------------------------------------------------------------------
   // Job generation
